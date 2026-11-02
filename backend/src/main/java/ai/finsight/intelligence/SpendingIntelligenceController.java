@@ -1,0 +1,2 @@
+package ai.finsight.intelligence;import org.springframework.security.core.Authentication;import org.springframework.web.bind.annotation.*;
+@RestController @RequestMapping("/api/intelligence/spending") public class SpendingIntelligenceController{private final SpendingIntelligenceService service;public SpendingIntelligenceController(SpendingIntelligenceService s){service=s;}@GetMapping public SpendingIntelligenceService.Report report(Authentication a){return service.report(a.getName());}}

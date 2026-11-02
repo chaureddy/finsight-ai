@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+backend/target/
+backend/.m2/
+backend/.maven-cache/
+
+*.log

@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: finsight
+      POSTGRES_USER: finsight
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-development-only}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    # Keep a version-specific volume so an older major-version cluster is never
+    # accidentally mounted into PostgreSQL 18. Existing volumes are left intact.
+    volumes: ["finsight-data-pg18:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finsight -d finsight"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  finsight-data-pg18:

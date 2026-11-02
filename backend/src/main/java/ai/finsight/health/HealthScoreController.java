@@ -1,0 +1,2 @@
+package ai.finsight.health;import org.springframework.security.core.Authentication;import org.springframework.web.bind.annotation.*;
+@RestController @RequestMapping("/api/financial-health") public class HealthScoreController{private final HealthScoreService service;public HealthScoreController(HealthScoreService s){service=s;}@GetMapping public HealthScoreService.Assessment assess(Authentication a){return service.assess(a.getName());}}
