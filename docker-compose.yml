@@ -1,18 +1,61 @@
 services:
   postgres:
     image: postgres:18-alpine
+    container_name: finsight-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: finsight
       POSTGRES_USER: finsight
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-development-only}
-    ports: ["${POSTGRES_PORT:-5432}:5432"]
-    # Keep a version-specific volume so an older major-version cluster is never
-    # accidentally mounted into PostgreSQL 18. Existing volumes are left intact.
-    volumes: ["finsight-data-pg18:/var/lib/postgresql/data"]
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-finsight_dev_secret}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - finsight-data-pg18:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U finsight -d finsight"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: finsight-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8081}:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/finsight
+      SPRING_DATASOURCE_USERNAME: finsight
+      SPRING_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD:-finsight_dev_secret}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_BASE_URL: ${PAYPAL_BASE_URL:-https://api-m.sandbox.paypal.com}
+      PAYPAL_SIGNED_AMOUNT_DIRECTION_VERIFIED: ${PAYPAL_SIGNED_AMOUNT_DIRECTION_VERIFIED:-false}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-finsight-master-encryption-key-for-credentials-32b}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8081/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: finsight-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+
 volumes:
   finsight-data-pg18:

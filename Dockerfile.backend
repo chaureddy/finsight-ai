@@ -1,0 +1,17 @@
+# Stage 1: Build Spring Boot application
+FROM maven:3.9.16-eclipse-temurin-21 AS build
+WORKDIR /workspace/backend
+COPY backend/.mvn/ .mvn/
+COPY backend/mvnw backend/mvnw.cmd backend/pom.xml ./
+COPY backend/src/ src/
+RUN chmod +x mvnw && ./mvnw -B -DskipTests clean package
+
+# Stage 2: Minimal runtime image
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+RUN addgroup -S finsight && adduser -S -G finsight finsight
+COPY --from=build /workspace/backend/target/finsight-api-0.1.0.jar /app/app.jar
+USER finsight
+EXPOSE 8081
+ENV PORT=8081
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

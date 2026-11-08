@@ -1,5 +1,5 @@
 server:
-  port: ${PORT:8080}
+  port: ${PORT:8081}
   servlet:
     session:
       cookie:
@@ -10,7 +10,7 @@ spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://127.0.0.1:5432/finsight}
     username: ${DATABASE_USERNAME:finsight}
-    password: ${DATABASE_PASSWORD:development-only}
+    password: ${DATABASE_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -26,3 +26,5 @@ paypal:
   client-id: ${PAYPAL_CLIENT_ID:}
   client-secret: ${PAYPAL_CLIENT_SECRET:}
   base-url: ${PAYPAL_BASE_URL:https://api-m.sandbox.paypal.com}
+  import:
+    signed-amount-direction-verified: ${PAYPAL_SIGNED_AMOUNT_DIRECTION_VERIFIED:false}

@@ -49,3 +49,11 @@
 ## PayPal milestone verification note (2026-11-02)
 
 Earlier statements in this document about PostgreSQL V1–V3 verification are historical. The prior milestone did verify V1–V3 against PostgreSQL 18. This PayPal milestone adds V4, which currently passed only under H2 PostgreSQL compatibility mode; V4 has not yet been run against the live PostgreSQL 18 server. Automated PayPal tests use mocked provider responses and do not establish Sandbox credential, permission, or data availability.
+
+## Sprint update (2026-11-03)
+
+- The default database password is now required rather than falling back to a known sample value. Rotate the exposed `finsight` role password before the next authenticated application run; do not put it in source or chat.
+- PayPal automatic imports are gated off by default until real incoming/outgoing Sandbox records verify the amount-sign mapping. Test fixtures and mocked provider responses are not sufficient evidence to enable the gate.
+- The PostgreSQL service was reachable at `127.0.0.1:5432`, but the project could not authenticate or verify existing role/database permissions because no admin/app credentials were available. V4 against PostgreSQL 18 is still unverified.
+- Login throttling, production response headers/CSP, monitoring, backup/restore validation, and an incident/credential rotation procedure remain deployment blockers.
+- `npm audit --audit-level=moderate` reported zero vulnerabilities on 2026-11-03. This is a point-in-time frontend dependency check, not a complete security review.

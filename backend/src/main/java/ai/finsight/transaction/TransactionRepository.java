@@ -8,6 +8,9 @@ import java.util.*;
 public interface TransactionRepository extends JpaRepository<FinancialTransaction,UUID> {
  List<FinancialTransaction> findAllByUserIdOrderByOccurredOnDesc(UUID userId);
  Optional<FinancialTransaction> findByIdAndUserId(UUID id,UUID userId);
+ boolean existsByUserIdAndSourceProviderAndExternalReference(UUID userId, String sourceProvider, String externalReference);
+ long countByUserIdAndSourceProvider(UUID userId, String sourceProvider);
+ List<FinancialTransaction> findAllByUserIdAndSourceProviderOrderByOccurredOnDesc(UUID userId, String sourceProvider);
  @Query("select coalesce(sum(t.amount), 0) from FinancialTransaction t where t.userId=:owner and t.occurredOn>=:from and t.occurredOn<:to and t.direction=:direction")
  BigDecimal sumForOwnerAndPeriod(@Param("owner") UUID owner,@Param("from") LocalDate from,@Param("to") LocalDate to,@Param("direction") FinancialTransaction.Direction direction);
  @Query("select coalesce(sum(t.amount),0) from FinancialTransaction t where t.userId=:owner and t.occurredOn>=:from and t.occurredOn<:to and t.direction=:direction and t.category=:category")

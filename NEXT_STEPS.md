@@ -1,5 +1,9 @@
 # FinSight AI — Next Codex Session Handover
 
+## Latest sprint note (2026-11-03)
+
+PayPal automatic import is disabled by default until real incoming and outgoing Sandbox report data verifies signed-amount direction. Backend tests passed (20), frontend tests passed (9), and the frontend TypeScript/production build passed. PostgreSQL 18 accepts connections, but credentials were unavailable; rotate the exposed `finsight` password, verify database ownership/permissions, and run the preserved verifier (including its V4 checks). No real PayPal credentials/request or cloud deployment was used. See `DEPLOYMENT.md` for the prepared architecture and remaining production gates.
+
 ## Current state
 
 Project root: `C:\Users\P.Saravanan\Documents\FinSight-AI` (the requested `finsight-ai` path is the same Windows directory; do not modify its parent Git worktree).

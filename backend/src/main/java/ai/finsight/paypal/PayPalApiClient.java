@@ -13,6 +13,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URI;
 import java.time.*;
 import java.util.*;
@@ -28,6 +29,7 @@ public class PayPalApiClient implements PayPalGateway {
     private final RestClient client;
     private volatile CachedToken cachedToken;
     public boolean isConfigured() { return !clientId.isBlank() && !clientSecret.isBlank(); }
+    public String getClientId() { return clientId; }
 
     @Autowired
     public PayPalApiClient(RestClient.Builder builder,
@@ -65,8 +67,146 @@ public class PayPalApiClient implements PayPalGateway {
             JsonNode details = response.path("transaction_details");
             if (details.isArray()) details.forEach(item -> result.add(parse(item.path("transaction_info"))));
             int pages = response.path("total_pages").asInt(1);
+            if (pages == 0) return List.copyOf(result);
             if (pages < 1 || pages > MAX_PAGES) throw unavailable();
             if (page >= pages) return List.copyOf(result);
+        }
+        throw unavailable();
+    }
+
+    @Override
+    public PayPalOrderResponse createOrder(BigDecimal amount, String currency, String description) {
+        requireConfigured();
+        String token = accessToken();
+        String currencyCode = (currency != null && !currency.isBlank()) ? currency.toUpperCase().trim() : "USD";
+        BigDecimal orderAmount = (amount != null) ? amount.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        String desc = (description != null && !description.isBlank()) ? description.trim() : "FinSight AI Payment";
+
+        Map<String, Object> orderPayload = new HashMap<>();
+        orderPayload.put("intent", "CAPTURE");
+
+        Map<String, Object> amountMap = new HashMap<>();
+        amountMap.put("currency_code", currencyCode);
+        amountMap.put("value", orderAmount.toPlainString());
+
+        Map<String, Object> unit = new HashMap<>();
+        unit.put("reference_id", "finsight-" + UUID.randomUUID());
+        unit.put("description", desc);
+        unit.put("amount", amountMap);
+
+        orderPayload.put("purchase_units", List.of(unit));
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                JsonNode response = client.post()
+                        .uri(URI.create(baseUrl + "/v2/checkout/orders"))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Prefer", "return=representation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(orderPayload)
+                        .retrieve()
+                        .body(JsonNode.class);
+
+                if (response == null) throw unavailable();
+                String orderId = text(response, "id");
+                String status = text(response, "status");
+                String approveUrl = "";
+                JsonNode links = response.path("links");
+                if (links.isArray()) {
+                    for (JsonNode link : links) {
+                        if ("approve".equalsIgnoreCase(text(link, "rel"))) {
+                            approveUrl = text(link, "href");
+                            break;
+                        }
+                    }
+                }
+                if (orderId.isBlank()) throw unavailable();
+                return new PayPalOrderResponse(orderId, status, approveUrl);
+            } catch (HttpStatusCodeException ex) {
+                if (ex.getStatusCode().value() == 401 && attempt == 0) {
+                    synchronized (this) { cachedToken = null; }
+                    token = accessToken();
+                    continue;
+                }
+                if ((ex.getStatusCode().value() == 429 || ex.getStatusCode().is5xxServerError()) && attempt == 0) {
+                    pause();
+                    continue;
+                }
+                throw unavailable();
+            } catch (ResourceAccessException ex) {
+                if (attempt == 0) { pause(); continue; }
+                throw unavailable();
+            } catch (RestClientException ex) {
+                throw unavailable();
+            }
+        }
+        throw unavailable();
+    }
+
+    @Override
+    public PayPalCaptureResponse captureOrder(String orderId) {
+        requireConfigured();
+        if (orderId == null || orderId.isBlank()) {
+            throw new IllegalArgumentException("Invalid PayPal Order ID");
+        }
+        String token = accessToken();
+        URI uri = URI.create(baseUrl + "/v2/checkout/orders/" + orderId.trim() + "/capture");
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                JsonNode response = client.post()
+                        .uri(uri)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .header("Prefer", "return=representation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{}")
+                        .retrieve()
+                        .body(JsonNode.class);
+
+                if (response == null) throw unavailable();
+                String id = text(response, "id");
+                String status = text(response, "status");
+
+                String captureId = "";
+                BigDecimal captureAmount = null;
+                String currency = "USD";
+                BigDecimal fee = null;
+
+                JsonNode purchaseUnits = response.path("purchase_units");
+                if (purchaseUnits.isArray() && !purchaseUnits.isEmpty()) {
+                    JsonNode captures = purchaseUnits.get(0).path("payments").path("captures");
+                    if (captures.isArray() && !captures.isEmpty()) {
+                        JsonNode cap = captures.get(0);
+                        captureId = text(cap, "id");
+                        JsonNode amtNode = cap.path("amount");
+                        captureAmount = decimal(amtNode, "value");
+                        currency = text(amtNode, "currency_code");
+                        JsonNode breakdown = cap.path("seller_receivable_breakdown");
+                        if (!breakdown.isMissingNode()) {
+                            fee = decimal(breakdown.path("paypal_fee"), "value");
+                        }
+                    }
+                }
+
+                String payerEmail = text(response.path("payer"), "email_address");
+                return new PayPalCaptureResponse(id, status, captureId, captureAmount, currency, fee, payerEmail);
+            } catch (HttpStatusCodeException ex) {
+                if (ex.getStatusCode().value() == 401 && attempt == 0) {
+                    synchronized (this) { cachedToken = null; }
+                    token = accessToken();
+                    continue;
+                }
+                if ((ex.getStatusCode().value() == 429 || ex.getStatusCode().is5xxServerError()) && attempt == 0) {
+                    pause();
+                    continue;
+                }
+                throw unavailable();
+            } catch (ResourceAccessException ex) {
+                if (attempt == 0) { pause(); continue; }
+                throw unavailable();
+            } catch (RestClientException ex) {
+                throw unavailable();
+            }
         }
         throw unavailable();
     }
@@ -74,7 +214,7 @@ public class PayPalApiClient implements PayPalGateway {
     private JsonNode getPage(String token, LocalDate startDate, LocalDate endDate, int page) {
         URI uri = URI.create(baseUrl + "/v1/reporting/transactions?start_date=" + encode(startDate, false)
                 + "&end_date=" + encode(endDate, true) + "&page=" + page + "&page_size=" + PAGE_SIZE
-                + "&fields=transaction_info&balance_affecting_records_only=true");
+                + "&fields=transaction_info&balance_affecting_records_only=Y");
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
                 return client.get().uri(uri).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)

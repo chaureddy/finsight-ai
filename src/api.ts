@@ -23,6 +23,23 @@ export type SpendingData = {topCategories:{category:string;amount:number}[];mont
 export type PayPalStatus = {configured:boolean;connected:boolean;state:'CONNECTED'|'NOT_CONNECTED'|'NOT_CONFIGURED';connectedAt:string|null;lastVerifiedAt:string|null};
 export type PayPalReviewItem = {id:string;paypalTransactionId:string|null;occurredOn:string|null;amount:number|null;currencyCode:string|null;eventCode:string|null;reason:string};
 export type PayPalImportResult = {importedCount:number;duplicateCount:number;reviewCount:number;environment:'SANDBOX';state:'CONNECTED'};
+export type PayPalOrderResponse = { orderId: string; status: string; approveUrl: string };
+export type CreateOrderParams = { amount: number; currency: string; description?: string };
+export type CaptureOrderParams = { description?: string; category?: string; direction?: 'INCOME' | 'EXPENSE' };
+export type ConnectedAccount = { id: string; provider: string; accountName: string; accountType: string; status: string; lastSync: string | null; transactionCount: number; balance: number | null };
+export type AccountsOverview = { accounts: ConnectedAccount[]; totalConnected: number; totalTransactionsImported: number };
+export type CsvImportResult = { importedCount: number; duplicateCount: number; skippedCount: number; warnings: string[] };
+export type AiChatResponse = { reply: string; suggestedQuestions: string[]; groundingData: Record<string, unknown>; provider: string };
+export type SmartInsight = { id: string; title: string; category: string; tone: string; message: string; actionLink: string; actionLabel: string };
+export type ComprehensiveIntelligence = {
+  topMerchants: { merchant: string; totalAmount: number; transactionCount: number; topCategory: string }[];
+  detectedSubscriptions: { description: string; averageAmount: number; category: string; frequency: string; occurrences: number; lastSeen: string }[];
+  refunds: { description: string; amount: number; date: string; sourceProvider: string }[];
+  recommendations: { title: string; category: string; impact: string; advice: string; potentialSavings: number | null }[];
+  totalMonthlySubscriptions: number;
+  highestCategorySpend: number;
+  highestSpendCategoryName: string;
+};
 let csrf: CsrfResponse | undefined;
 
 async function getCsrf(): Promise<CsrfResponse> {
@@ -62,6 +79,9 @@ export const authApi = {
     await api.post('/auth/login', body, { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
     return this.currentUser();
   },
+  async updateProfile(displayName: string) {
+    return (await api.put<UserProfile>('/auth/profile', { displayName })).data;
+  },
   async logout() { await api.post('/auth/logout'); csrf = undefined; },
 };
 
@@ -70,6 +90,10 @@ export const financeApi = {
   async createTransaction(input: TransactionInput) { return (await api.post<ApiTransaction>('/transactions', input)).data; },
   async updateTransaction(id: string, input: TransactionInput) { return (await api.put<ApiTransaction>(`/transactions/${id}`, input)).data; },
   async deleteTransaction(id: string) { await api.delete(`/transactions/${id}`); },
+  async importCsv(csvData: string, accountLabel?: string) { return (await api.post<CsvImportResult>('/transactions/import-csv', { csvData, accountLabel })).data; },
+  async exportCsv(): Promise<string> { return (await api.get<string>('/transactions/export', { responseType: 'text' })).data; },
+  async accounts() { return (await api.get<AccountsOverview>('/accounts')).data; },
+  async deleteAccount(id: string) { await api.delete(`/accounts/${id}`); },
   async cashFlow() { return (await api.get<CashFlowSummary>('/analytics/cash-flow')).data; },
   async financialRecords(kind: FinancialKind) { return (await api.get<FinancialRecord[]>(`/${kind}`)).data; },
   async createFinancialRecord(kind: FinancialKind, input: Record<string, string | number | null>) { return (await api.post<FinancialRecord>(`/${kind}`, input)).data; },
@@ -95,8 +119,17 @@ export const financeApi = {
   async financialHealth() { return (await api.get<HealthData>('/financial-health')).data; },
   async spendingIntelligence() { return (await api.get<SpendingData>('/intelligence/spending')).data; },
   async paypalStatus() { return (await api.get<PayPalStatus>('/integrations/paypal/status')).data; },
+  async paypalDisconnect() { await api.post('/integrations/paypal/disconnect'); },
   async paypalReviews() { return (await api.get<PayPalReviewItem[]>('/integrations/paypal/review')).data; },
+  async paypalDismissReview(id: string) { await api.post(`/integrations/paypal/review/${id}/dismiss`); },
+  async paypalApproveReview(id: string, data?: { description?: string; category?: string; direction?: 'INCOME'|'EXPENSE' }) { return (await api.post<ApiTransaction>(`/integrations/paypal/review/${id}/approve`, data || {})).data; },
+  async paypalOAuthAuthorize() { return (await api.get<{ authorizationUrl: string; state: string }>('/integrations/paypal/oauth/authorize')).data; },
+  async paypalCreateOrder(params: CreateOrderParams) { return (await api.post<PayPalOrderResponse>('/integrations/paypal/orders', params)).data; },
+  async paypalCaptureOrder(orderId: string, params?: CaptureOrderParams) { return (await api.post<ApiTransaction>(`/integrations/paypal/orders/${orderId}/capture`, params || {})).data; },
   async importPayPal(startDate:string,endDate:string) { return (await api.post<PayPalImportResult>('/integrations/paypal/import',{startDate,endDate})).data; },
+  async aiChat(message: string) { return (await api.post<AiChatResponse>('/assistant/chat', { message })).data; },
+  async aiInsights() { return (await api.get<SmartInsight[]>('/assistant/insights')).data; },
+  async advancedIntelligence() { return (await api.get<ComprehensiveIntelligence>('/intelligence/advanced')).data; },
 };
 
 export function apiErrorMessage(error: unknown): string {

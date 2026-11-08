@@ -8,4 +8,6 @@ public class AppUser {
  protected AppUser() {}
  public AppUser(String email,String passwordHash,String displayName){this.id=UUID.randomUUID();this.email=email;this.passwordHash=passwordHash;this.displayName=displayName;this.createdAt=Instant.now();}
  public UUID getId(){return id;} public String getEmail(){return email;} public String getPasswordHash(){return passwordHash;} public String getDisplayName(){return displayName;}
+ public void updateProfile(String displayName){this.displayName=displayName;}
+ public void updatePassword(String passwordHash){this.passwordHash=passwordHash;}
 }

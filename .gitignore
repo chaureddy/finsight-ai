@@ -9,3 +9,14 @@ backend/.m2/
 backend/.maven-cache/
 
 *.log
+# Local secrets
+# Local dependency caches
+# Build outputs
+**/target/
+# Local IDE files
+.idea/
+.vscode/
+
+# Root Maven cache
+/.m2/
+scratch/

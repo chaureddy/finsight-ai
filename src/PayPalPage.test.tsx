@@ -3,9 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PayPalPage from './PayPalPage';
 
-const mocks=vi.hoisted(()=>({status:vi.fn(),reviews:vi.fn(),import:vi.fn()}));
+const mocks=vi.hoisted(()=>({status:vi.fn(),reviews:vi.fn(),import:vi.fn(),createOrder:vi.fn(),captureOrder:vi.fn()}));
 vi.mock('./api',()=>({
-  financeApi:{paypalStatus:mocks.status,paypalReviews:mocks.reviews,importPayPal:mocks.import},
+  financeApi:{
+    paypalStatus:mocks.status,
+    paypalReviews:mocks.reviews,
+    importPayPal:mocks.import,
+    paypalCreateOrder:mocks.createOrder,
+    paypalCaptureOrder:mocks.captureOrder,
+  },
   apiErrorMessage:()=> 'Sandbox reporting is unavailable.',
 }));
 afterEach(()=>{cleanup();vi.clearAllMocks();});
@@ -26,5 +32,33 @@ describe('PayPal Sandbox page',()=>{
     fireEvent.click(screen.getByRole('button',{name:/verify & import/i}));
     await waitFor(()=>expect(mocks.import).toHaveBeenCalledTimes(1));
     await waitFor(()=>expect(screen.getByRole('status').textContent).toContain('2 imported, 1 duplicates skipped, 3 records queued for review.'));
+  });
+
+  it('simulates order creation and capture and displays recorded details', async () => {
+    mocks.status.mockResolvedValue({ configured: true, connected: true, state: 'CONNECTED', connectedAt: null, lastVerifiedAt: null });
+    mocks.reviews.mockResolvedValue([]);
+    mocks.createOrder.mockResolvedValue({ orderId: 'ORD-TEST-123', status: 'CREATED', approveUrl: 'https://sandbox.paypal.com' });
+    mocks.captureOrder.mockResolvedValue({ id: 'tx-1', amount: 50, category: 'Software', description: 'Cloud Server Subscription' });
+
+    render(<PayPalPage enabled />);
+    expect(await screen.findByText(/paypal sandbox checkout simulator/i)).toBeTruthy();
+
+    const submitBtn = screen.getByRole('button', { name: /execute sandbox checkout & capture/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => expect(mocks.createOrder).toHaveBeenCalledWith({
+      amount: 50,
+      currency: 'USD',
+      description: 'Cloud Server Subscription',
+    }));
+    await waitFor(() => expect(mocks.captureOrder).toHaveBeenCalledWith('ORD-TEST-123', {
+      description: 'Cloud Server Subscription',
+      category: 'Software',
+      direction: 'EXPENSE',
+    }));
+
+    expect(await screen.findByText(/order successfully captured & recorded/i)).toBeTruthy();
+    expect(screen.getByText('ORD-TEST-123')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /analyze with ai assistant/i })).toBeTruthy();
   });
 });

@@ -9,7 +9,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "paypal_import_record", uniqueConstraints = @UniqueConstraint(name = "paypal_import_fingerprint_uq", columnNames = {"connection_id", "source_fingerprint"}))
 public class PayPalImportRecord {
-    public enum State { IMPORTED, REVIEW }
+    public enum State { IMPORTED, REVIEW, DISMISSED }
     @Id private UUID id;
     @ManyToOne(fetch = FetchType.LAZY, optional = false) @JoinColumn(name = "connection_id", nullable = false) private PayPalConnection connection;
     @Column(name = "paypal_transaction_id", length = 24) private String paypalTransactionId;
@@ -31,7 +31,11 @@ public class PayPalImportRecord {
         this.eventCode = data.eventCode(); this.paypalStatus = data.status(); this.state = state;
         this.reviewReason = reason; this.financialTransactionId = transactionId; this.createdAt = Instant.now();
     }
+    public void dismiss() { this.state = State.DISMISSED; }
+    public void resolve(UUID transactionId) { this.state = State.IMPORTED; this.financialTransactionId = transactionId; this.reviewReason = null; }
     public UUID getId() { return id; }
+    public PayPalConnection getConnection() { return connection; }
+    public String getSourceFingerprint() { return sourceFingerprint; }
     public String getPaypalTransactionId() { return paypalTransactionId; }
     public LocalDate getOccurredOn() { return occurredOn; }
     public BigDecimal getAmount() { return amount; }

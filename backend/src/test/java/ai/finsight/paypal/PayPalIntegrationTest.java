@@ -35,7 +35,16 @@ class PayPalIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired TransactionRepository transactions;
     @Autowired UserRepository users;
+    @Autowired PayPalConnectionRepository connections;
+    @Autowired PayPalImportRecordRepository imports;
     @MockBean PayPalApiClient paypal;
+
+    @org.junit.jupiter.api.BeforeEach
+    void clean() {
+        imports.deleteAll();
+        connections.deleteAll();
+        transactions.deleteAll();
+    }
 
     @Test void authenticatedSandboxImportIsCsrfProtectedDeduplicatedReviewableAndOwnerScoped() throws Exception {
         when(paypal.isConfigured()).thenReturn(true);
@@ -65,15 +74,15 @@ class PayPalIntegrationTest {
         doReturn(List.of(supported,foreignCurrency,fee,reversed,missingId)).when(paypal).search(any(),any());
         mvc.perform(post("/api/integrations/paypal/import").session(alice).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.environment").value("SANDBOX"))
-                .andExpect(jsonPath("$.importedCount").value(1)).andExpect(jsonPath("$.duplicateCount").value(0)).andExpect(jsonPath("$.reviewCount").value(4));
+                .andExpect(jsonPath("$.importedCount").value(0)).andExpect(jsonPath("$.duplicateCount").value(0)).andExpect(jsonPath("$.reviewCount").value(5));
 
         String aliceEmail=json.readTree(mvc.perform(get("/api/auth/me").session(alice)).andReturn().getResponse().getContentAsString()).get("email").asText();
         UUID aliceId=users.findByEmailIgnoreCase(aliceEmail).orElseThrow().getId();
         var saved=transactions.findAllByUserIdOrderByOccurredOnDesc(aliceId);
-        assertEquals(1,saved.size()); assertEquals("PAYPAL",saved.getFirst().getSourceProvider()); assertEquals("PAYPALTXN00000000000001",saved.getFirst().getExternalReference());
-        assertEquals("1250.25",saved.getFirst().getAmount().toPlainString()); assertEquals("INR",saved.getFirst().getCurrencyCode());
-        assertEquals("INCOME",saved.getFirst().getDirection().name());
-        mvc.perform(get("/api/integrations/paypal/review").session(alice)).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(4));
+        assertTrue(saved.isEmpty());
+        MvcResult review=mvc.perform(get("/api/integrations/paypal/review").session(alice)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(5)).andReturn();
+        assertTrue(review.getResponse().getContentAsString().contains("UNVERIFIED_AMOUNT_DIRECTION"));
         mvc.perform(get("/api/transactions").session(bob)).andExpect(status().isOk()).andExpect(content().json("[]"));
         mvc.perform(get("/api/integrations/paypal/status").session(bob)).andExpect(status().isOk()).andExpect(jsonPath("$.connected").value(false));
         mvc.perform(get("/api/integrations/paypal/review").session(bob)).andExpect(status().isOk()).andExpect(content().json("[]"));
@@ -83,11 +92,38 @@ class PayPalIntegrationTest {
         mvc.perform(post("/api/integrations/paypal/import").session(bob).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(request))
                 .andExpect(status().isConflict());
         verify(paypal,times(3)).search(any(),any());
-        String id=saved.getFirst().getId().toString();
-        mvc.perform(put("/api/transactions/{id}",id).session(bob).with(csrf()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"description\":\"x\",\"category\":\"x\",\"amount\":1,\"direction\":\"EXPENSE\",\"occurredOn\":\""+date+"\"}"))
-                .andExpect(status().isNotFound());
-        mvc.perform(delete("/api/transactions/{id}",id).session(bob).with(csrf())).andExpect(status().isNotFound());
+    }
+
+    @Test void createsAndCapturesSandboxOrderSuccessfully() throws Exception {
+        when(paypal.isConfigured()).thenReturn(true);
+        MockHttpSession userSession = sessionFor("paypal-orders-"+UUID.randomUUID()+"@example.com", "OrderTester");
+
+        when(paypal.createOrder(any(), any(), any())).thenReturn(new PayPalOrderResponse("ORD-999", "CREATED", "https://sandbox.paypal.com/checkoutnow?token=ORD-999"));
+
+        mvc.perform(post("/api/integrations/paypal/orders")
+                .session(userSession).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"amount\":150.00,\"currency\":\"USD\",\"description\":\"Cloud Hosting Bill\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orderId").value("ORD-999"))
+                .andExpect(jsonPath("$.status").value("CREATED"))
+                .andExpect(jsonPath("$.approveUrl").value("https://sandbox.paypal.com/checkoutnow?token=ORD-999"));
+
+        when(paypal.captureOrder("ORD-999")).thenReturn(new PayPalCaptureResponse(
+                "ORD-999", "COMPLETED", "CAP-999", new BigDecimal("150.00"), "USD", new BigDecimal("4.50"), "payer@example.com"
+        ));
+
+        mvc.perform(post("/api/integrations/paypal/orders/ORD-999/capture")
+                .session(userSession).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"description\":\"Cloud Hosting Bill\",\"category\":\"Technology\",\"direction\":\"EXPENSE\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.amount").value(150.00))
+                .andExpect(jsonPath("$.category").value("Technology"))
+                .andExpect(jsonPath("$.direction").value("EXPENSE"))
+                .andExpect(jsonPath("$.sourceProvider").value("PAYPAL"));
+
+        mvc.perform(get("/api/integrations/paypal/status").session(userSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.connected").value(true));
     }
 
     private MockHttpSession sessionFor(String email,String name) throws Exception {

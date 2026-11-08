@@ -6,10 +6,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 
 @Service
@@ -21,9 +23,13 @@ public class PayPalImportPersistenceService {
     private final PayPalConnectionRepository connections;
     private final PayPalImportRecordRepository imports;
     private final TransactionRepository transactions;
+    private final boolean signedAmountDirectionVerified;
 
-    public PayPalImportPersistenceService(PayPalConnectionRepository connections, PayPalImportRecordRepository imports, TransactionRepository transactions) {
+    public PayPalImportPersistenceService(PayPalConnectionRepository connections, PayPalImportRecordRepository imports,
+            TransactionRepository transactions,
+            @Value("${paypal.import.signed-amount-direction-verified:false}") boolean signedAmountDirectionVerified) {
         this.connections = connections; this.imports = imports; this.transactions = transactions;
+        this.signedAmountDirectionVerified = signedAmountDirectionVerified;
     }
 
     public record Counts(int importedCount, int duplicateCount, int reviewCount) {}
@@ -75,6 +81,103 @@ public class PayPalImportPersistenceService {
                 .orElseGet(() -> new ConnectionStatus(configured, false, configured ? "NOT_CONNECTED" : "NOT_CONFIGURED", null, null));
     }
 
+    @Transactional
+    public void disconnect(UUID ownerId) {
+        connections.findByUserId(ownerId).ifPresent(connections::delete);
+    }
+
+    @Transactional
+    public void dismissReview(UUID ownerId, UUID reviewId) {
+        PayPalConnection connection = connections.findByUserId(ownerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No PayPal connection found."));
+        PayPalImportRecord record = imports.findById(reviewId)
+                .filter(r -> r.getConnection().getId().equals(connection.getId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review record not found."));
+        record.dismiss();
+        imports.save(record);
+    }
+
+    @Transactional
+    public FinancialTransaction approveReview(UUID ownerId, UUID reviewId, String description, String category, FinancialTransaction.Direction direction) {
+        PayPalConnection connection = connections.findByUserId(ownerId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No PayPal connection found."));
+        PayPalImportRecord record = imports.findById(reviewId)
+                .filter(r -> r.getConnection().getId().equals(connection.getId()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Review record not found."));
+        if (record.getState() != PayPalImportRecord.State.REVIEW) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Record is not in review state.");
+        }
+        BigDecimal amount = record.getAmount() != null ? record.getAmount().abs() : BigDecimal.ONE;
+        LocalDate date = record.getOccurredOn() != null ? record.getOccurredOn() : LocalDate.now();
+        String desc = (description != null && !description.isBlank()) ? description.trim() : "PayPal approved record";
+        String cat = (category != null && !category.isBlank()) ? category.trim() : "PayPal";
+        FinancialTransaction.Direction dir = direction != null ? direction : FinancialTransaction.Direction.EXPENSE;
+        String ref = record.getPaypalTransactionId() != null ? record.getPaypalTransactionId() : record.getSourceFingerprint();
+        FinancialTransaction tx = transactions.save(new FinancialTransaction(ownerId, desc, cat, amount, dir, date, "PAYPAL", ref, "INR"));
+        record.resolve(tx.getId());
+        imports.save(record);
+        return tx;
+    }
+
+    @Transactional
+    public FinancialTransaction recordOrderCapture(UUID ownerId, PayPalCaptureResponse capture, String description, String category, FinancialTransaction.Direction direction) {
+        PayPalConnection connection = connections.lockByEnvironment("SANDBOX").orElse(null);
+        if (connection != null && !connection.getUserId().equals(ownerId)) throw conflict();
+        if (connection == null) {
+            try {
+                connection = connections.saveAndFlush(new PayPalConnection(ownerId));
+            } catch (DataIntegrityViolationException ex) {
+                throw conflict();
+            }
+        }
+        connection.verifiedNow();
+
+        String desc = (description != null && !description.isBlank())
+                ? description.trim()
+                : "PayPal Order " + capture.orderId();
+        String cat = (category != null && !category.isBlank())
+                ? category.trim()
+                : "Shopping";
+        FinancialTransaction.Direction dir = (direction != null)
+                ? direction
+                : FinancialTransaction.Direction.EXPENSE;
+        BigDecimal amount = (capture.amount() != null) ? capture.amount().abs() : BigDecimal.ONE;
+        String currency = (capture.currency() != null && !capture.currency().isBlank())
+                ? capture.currency().toUpperCase()
+                : "INR";
+
+        String ref = (capture.captureId() != null && !capture.captureId().isBlank())
+                ? capture.captureId()
+                : capture.orderId();
+
+        FinancialTransaction saved = transactions.saveAndFlush(new FinancialTransaction(
+                ownerId,
+                desc,
+                cat,
+                amount,
+                dir,
+                LocalDate.now(),
+                "PAYPAL",
+                ref,
+                currency
+        ));
+
+        String fingerprint = "ORDER-" + capture.orderId() + "-" + ref;
+        PayPalTransactionData data = new PayPalTransactionData(
+                ref,
+                "S",
+                "T0006",
+                LocalDate.now(),
+                dir == FinancialTransaction.Direction.INCOME ? amount : amount.negate(),
+                currency,
+                capture.fee(),
+                fingerprint
+        );
+        imports.save(new PayPalImportRecord(connection, data, PayPalImportRecord.State.IMPORTED, null, saved.getId()));
+
+        return saved;
+    }
+
     public record ConnectionStatus(boolean configured, boolean connected, String state, Instant connectedAt, Instant lastVerifiedAt) {}
     public record ReviewItem(UUID id, String paypalTransactionId, java.time.LocalDate occurredOn, BigDecimal amount, String currencyCode, String eventCode, String reason) {}
     public java.util.List<ReviewItem> reviews(UUID ownerId) {
@@ -83,13 +186,14 @@ public class PayPalImportPersistenceService {
                 .orElseGet(java.util.List::of);
     }
 
-    private static String reviewReason(PayPalTransactionData x) {
+    private String reviewReason(PayPalTransactionData x) {
         if (!validId(x.transactionId())) return "MISSING_OR_INVALID_TRANSACTION_ID";
         if (x.status() == null || !x.status().equals("S")) return "UNSETTLED_OR_REVERSED";
         if (x.eventCode() == null || !SAFE_PAYMENT_CODES.contains(x.eventCode())) return "UNSUPPORTED_EVENT";
         if (x.occurredOn() == null) return "MISSING_DATE";
         if (!"INR".equals(x.currencyCode())) return "UNSUPPORTED_CURRENCY";
         if (x.signedAmount() == null || x.signedAmount().signum() == 0) return "AMBIGUOUS_AMOUNT";
+        if (!signedAmountDirectionVerified) return "UNVERIFIED_AMOUNT_DIRECTION";
         if (x.signedAmount().precision() > 19 || x.signedAmount().stripTrailingZeros().scale() > 2) return "UNSUPPORTED_PRECISION";
         if (x.feeAmount() != null && x.feeAmount().signum() != 0) return "FEE_OR_CURRENCY_MISMATCH";
         return null;

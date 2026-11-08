@@ -5,12 +5,12 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 
 const apiMocks = vi.hoisted(() => ({
-  currentUser: vi.fn(), register: vi.fn(), login: vi.fn(), logout: vi.fn(),
-  transactions: vi.fn(), createTransaction: vi.fn(), updateTransaction: vi.fn(), deleteTransaction: vi.fn(), cashFlow: vi.fn(), financialOverview: vi.fn(), financialRecords: vi.fn(), createFinancialRecord: vi.fn(), updateFinancialRecord: vi.fn(), deleteFinancialRecord: vi.fn(), budgets:vi.fn(),createBudget:vi.fn(),updateBudget:vi.fn(),deleteBudget:vi.fn(),goals:vi.fn(),createGoal:vi.fn(),updateGoal:vi.fn(),deleteGoal:vi.fn(),recurring:vi.fn(),upcomingRecurring:vi.fn(),createRecurring:vi.fn(),updateRecurring:vi.fn(),setRecurringActive:vi.fn(),deleteRecurring:vi.fn(),recordOccurrence:vi.fn(),forecast:vi.fn(),financialHealth:vi.fn(),spendingIntelligence:vi.fn(),
+  currentUser: vi.fn(), register: vi.fn(), login: vi.fn(), logout: vi.fn(), updateProfile: vi.fn(),
+  transactions: vi.fn(), createTransaction: vi.fn(), updateTransaction: vi.fn(), deleteTransaction: vi.fn(), cashFlow: vi.fn(), financialOverview: vi.fn(), financialRecords: vi.fn(), createFinancialRecord: vi.fn(), updateFinancialRecord: vi.fn(), deleteFinancialRecord: vi.fn(), budgets:vi.fn(),createBudget:vi.fn(),updateBudget:vi.fn(),deleteBudget:vi.fn(),goals:vi.fn(),createGoal:vi.fn(),updateGoal:vi.fn(),deleteGoal:vi.fn(),recurring:vi.fn(),upcomingRecurring:vi.fn(),createRecurring:vi.fn(),updateRecurring:vi.fn(),setRecurringActive:vi.fn(),deleteRecurring:vi.fn(),recordOccurrence:vi.fn(),forecast:vi.fn(),financialHealth:vi.fn(),spendingIntelligence:vi.fn(),aiInsights:vi.fn(),
 }));
 vi.mock('./api', () => ({
-  authApi: { currentUser: apiMocks.currentUser, register: apiMocks.register, login: apiMocks.login, logout: apiMocks.logout },
-  financeApi: { transactions: apiMocks.transactions, createTransaction: apiMocks.createTransaction, updateTransaction: apiMocks.updateTransaction, deleteTransaction: apiMocks.deleteTransaction, cashFlow: apiMocks.cashFlow, financialOverview: apiMocks.financialOverview, financialRecords: apiMocks.financialRecords, createFinancialRecord: apiMocks.createFinancialRecord, updateFinancialRecord: apiMocks.updateFinancialRecord, deleteFinancialRecord: apiMocks.deleteFinancialRecord, budgets:apiMocks.budgets,createBudget:apiMocks.createBudget,updateBudget:apiMocks.updateBudget,deleteBudget:apiMocks.deleteBudget,goals:apiMocks.goals,createGoal:apiMocks.createGoal,updateGoal:apiMocks.updateGoal,deleteGoal:apiMocks.deleteGoal,recurring:apiMocks.recurring,upcomingRecurring:apiMocks.upcomingRecurring,createRecurring:apiMocks.createRecurring,updateRecurring:apiMocks.updateRecurring,setRecurringActive:apiMocks.setRecurringActive,deleteRecurring:apiMocks.deleteRecurring,recordOccurrence:apiMocks.recordOccurrence,forecast:apiMocks.forecast,financialHealth:apiMocks.financialHealth,spendingIntelligence:apiMocks.spendingIntelligence },
+  authApi: { currentUser: apiMocks.currentUser, register: apiMocks.register, login: apiMocks.login, logout: apiMocks.logout, updateProfile: apiMocks.updateProfile },
+  financeApi: { transactions: apiMocks.transactions, createTransaction: apiMocks.createTransaction, updateTransaction: apiMocks.updateTransaction, deleteTransaction: apiMocks.deleteTransaction, cashFlow: apiMocks.cashFlow, financialOverview: apiMocks.financialOverview, financialRecords: apiMocks.financialRecords, createFinancialRecord: apiMocks.createFinancialRecord, updateFinancialRecord: apiMocks.updateFinancialRecord, deleteFinancialRecord: apiMocks.deleteFinancialRecord, budgets:apiMocks.budgets,createBudget:apiMocks.createBudget,updateBudget:apiMocks.updateBudget,deleteBudget:apiMocks.deleteBudget,goals:apiMocks.goals,createGoal:apiMocks.createGoal,updateGoal:apiMocks.updateGoal,deleteGoal:apiMocks.deleteGoal,recurring:apiMocks.recurring,upcomingRecurring:apiMocks.upcomingRecurring,createRecurring:apiMocks.createRecurring,updateRecurring:apiMocks.updateRecurring,setRecurringActive:apiMocks.setRecurringActive,deleteRecurring:apiMocks.deleteRecurring,recordOccurrence:apiMocks.recordOccurrence,forecast:apiMocks.forecast,financialHealth:apiMocks.financialHealth,spendingIntelligence:apiMocks.spendingIntelligence,aiInsights:apiMocks.aiInsights },
   apiErrorMessage: () => 'API request failed',
 }));
 
@@ -30,6 +30,8 @@ beforeEach(() => {
   apiMocks.financialOverview.mockResolvedValue({ totalAssets:0,totalInvestments:0,totalLiabilities:0,netWorth:0,monthlyEmiCommitment:0,totalInsuranceCoverage:0,monthlyIncome:85000,monthlyExpenses:0,monthlySavings:85000,savingsRatePercent:100 });
   apiMocks.financialRecords.mockResolvedValue([]); apiMocks.createFinancialRecord.mockResolvedValue({id:'asset-1',name:'Emergency cash',category:'Cash',currentValue:500});
   apiMocks.budgets.mockResolvedValue([]);apiMocks.createBudget.mockResolvedValue({id:'budget-1',name:'Food plan',category:'Food',monthlyLimit:1200,amountSpent:0,remainingAmount:1200,percentageConsumed:0,alertTriggered:false,exceeded:false,status:'ON_TRACK'});
+  apiMocks.aiInsights.mockResolvedValue([]);
+  apiMocks.updateProfile.mockResolvedValue(user);
 });
 afterEach(cleanup);
 
@@ -145,5 +147,96 @@ describe('FinSight workspace', () => {
     await waitFor(() => expect(apiMocks.createBudget).toHaveBeenCalledWith(expect.objectContaining({
       name: 'Food plan', category: 'Food', monthlyLimit: 1200,
     })));
+  });
+
+  it('guest user sees Login and Register tabs and switches between them', async () => {
+    renderApp();
+    await screen.findByRole('heading', { name: /welcome back/i });
+    expect(screen.getByRole('tab', { name: /sign in/i })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /create account/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('tab', { name: /create account/i }));
+    expect(await screen.findByRole('heading', { name: /create your account/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('tab', { name: /sign in/i }));
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeTruthy();
+  });
+
+  it('displays an error when login fails', async () => {
+    apiMocks.login.mockRejectedValue({ response: { status: 401, data: { message: 'Invalid credentials' } } });
+    renderApp();
+    await screen.findByRole('heading', { name: /welcome back/i });
+
+    fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'bad@example.com' } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'wrongpassword' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+  });
+
+  it('authenticated user sees profile avatar, opens menu, and navigates to profile', async () => {
+    apiMocks.currentUser.mockResolvedValue(user);
+    renderApp();
+    await screen.findByRole('heading', { name: /good morning, alex/i });
+
+    const avatarBtn = screen.getByRole('button', { name: /open profile menu/i });
+    expect(avatarBtn).toBeTruthy();
+    fireEvent.click(avatarBtn);
+
+    const menu = screen.getByRole('menu', { name: /user profile options/i });
+    expect(menu).toBeTruthy();
+    expect(within(menu).getByText('alex@example.com')).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: /account settings/i })).toBeTruthy();
+
+    const profileLink = within(menu).getByRole('menuitem', { name: /profile/i });
+    fireEvent.click(profileLink);
+
+    expect(await screen.findByRole('heading', { name: /user profile/i })).toBeTruthy();
+    expect(screen.getByDisplayValue('alex@example.com')).toBeTruthy();
+  });
+
+  it('profile page updates display name and reflects in header', async () => {
+    apiMocks.currentUser.mockResolvedValue(user);
+    apiMocks.updateProfile.mockResolvedValue({ id: 'user-1', displayName: 'Alexandre Great', email: 'alex@example.com' });
+    renderApp();
+    await screen.findByRole('heading', { name: /good morning, alex/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /open profile menu/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /profile/i }));
+    await screen.findByRole('heading', { name: /user profile/i });
+
+    const input = screen.getByLabelText(/display name/i);
+    fireEvent.change(input, { target: { value: 'Alexandre Great' } });
+    fireEvent.click(screen.getByRole('button', { name: /save profile changes/i }));
+
+    await waitFor(() => {
+      expect(apiMocks.updateProfile).toHaveBeenCalledWith('Alexandre Great');
+    });
+    expect(await screen.findByText(/profile updated successfully/i)).toBeTruthy();
+  });
+
+  it('logout from topbar profile menu terminates session and redirects to guest landing screen', async () => {
+    apiMocks.currentUser.mockResolvedValue(user);
+    renderApp();
+    await screen.findByRole('heading', { name: /good morning, alex/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /open profile menu/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /sign out/i }));
+
+    await waitFor(() => {
+      expect(apiMocks.logout).toHaveBeenCalled();
+    });
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeTruthy();
+  });
+
+  it('handles session expiration event and returns to guest screen', async () => {
+    apiMocks.currentUser.mockResolvedValue(user);
+    renderApp();
+    await screen.findByRole('heading', { name: /good morning, alex/i });
+
+    window.dispatchEvent(new CustomEvent('finsight:session-expired'));
+
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Your session has ended');
   });
 });

@@ -260,11 +260,17 @@ try {
     Write-Host '[PASS] Spring Boot started with PostgreSQL configuration and Flyway completed' -ForegroundColor Green
 
     $env:PGPASSWORD = $databasePassword
-    $migration = Invoke-Psql $psqlPath $pgHost $pgPort $databaseUser $databaseName "SELECT string_agg(version || ':' || success::text, ',' ORDER BY installed_rank) FROM public.flyway_schema_history WHERE version IN ('1','2','3');"
-    if ($migration -ne '1:true,2:true,3:true') { throw "Expected successful PostgreSQL Flyway V1, V2, and V3 (reported '$migration')." }
-    Write-Host '[PASS] PostgreSQL Flyway history reports V1, V2, and V3 successful' -ForegroundColor Green
-    Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    $migration = Invoke-Psql $psqlPath $pgHost $pgPort $databaseUser $databaseName "SELECT string_agg(version || ':' || success::text, ',' ORDER BY installed_rank) FROM public.flyway_schema_history WHERE version IN ('1','2','3','4');"
+    if ($migration -ne '1:true,2:true,3:true,4:true') {
+        throw "Expected successful PostgreSQL Flyway V1, V2, V3, and V4 (reported '$migration')."
+    }
+    Write-Host '[PASS] PostgreSQL Flyway history reports V1, V2, V3, and V4 successful' -ForegroundColor Green
 
+    $paypalSchema = Invoke-Psql $psqlPath $pgHost $pgPort $databaseUser $databaseName "SELECT CASE WHEN to_regclass('public.paypal_sandbox_connection') IS NOT NULL AND to_regclass('public.paypal_import_record') IS NOT NULL AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'financial_transaction' AND column_name IN ('source_provider','external_reference','currency_code')) = 3 THEN 'V4_SCHEMA_OK' ELSE 'V4_SCHEMA_MISSING' END;"
+    if ($paypalSchema -ne 'V4_SCHEMA_OK') {
+        throw "PostgreSQL V4 schema verification failed (reported '$paypalSchema')."
+    }
+    Write-Host '[PASS] PostgreSQL V4 PayPal tables and transaction columns exist' -ForegroundColor Green
     $script:aliceEmail = "verify-$([Guid]::NewGuid().ToString('N'))@example.invalid"
     $script:bobEmail = "verify-$([Guid]::NewGuid().ToString('N'))@example.invalid"
     $alicePassword = [Guid]::NewGuid().ToString('N') + 'Aa9!'
