@@ -102,3 +102,4 @@ FinSight AI's conversational assistant (`/assistant`) solves the fundamental fla
 1. **Interactive Buyer Approval**: Executing final settlement via `POST /v2/checkout/orders/{id}/capture` requires an interactive PayPal Sandbox personal buyer to approve the transaction in the PayPal modal. In headless test runs, order creation is 100% verified, while capture settlement requires human buyer sign-in.
 2. **Sandbox Environment Scope**: Exclusively configured for `api-m.sandbox.paypal.com` to prevent accidental production charges during evaluation.
 3. **Multi-Currency Conversion**: Transactions are tracked in their original settlement currency (USD, INR, EUR); real-time foreign exchange conversion is not applied.
+
